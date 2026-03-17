@@ -1,0 +1,64 @@
+{
+  "entities": {
+    "Website": {
+      "title": "Website",
+      "description": "A generated wedding website",
+      "type": "object",
+      "properties": {
+        "ownerUid": { "type": "string", "description": "The UID of the user who created this website" },
+        "slug": { "type": "string", "description": "The unique URL slug for the website" },
+        "brideName": { "type": "string", "description": "Name of the bride" },
+        "groomName": { "type": "string", "description": "Name of the groom" },
+        "weddingDate": { "type": "timestamp", "description": "The date of the main wedding event" },
+        "message": { "type": "string", "description": "A short message to the guests" },
+        "events": {
+          "type": "array",
+          "description": "List of wedding events",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "date": { "type": "timestamp" },
+              "time": { "type": "string" },
+              "venue": { "type": "string" },
+              "address": { "type": "string" }
+            },
+            "required": ["id", "name", "date", "time", "venue", "address"]
+          }
+        },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      },
+      "required": ["ownerUid", "slug", "brideName", "groomName", "weddingDate", "message", "events", "createdAt", "updatedAt"]
+    },
+    "RSVP": {
+      "title": "RSVP",
+      "description": "A guest's RSVP response",
+      "type": "object",
+      "properties": {
+        "guestName": { "type": "string", "description": "Name of the guest" },
+        "status": { "type": "string", "enum": ["attending", "not_attending"], "description": "Whether the guest is attending" },
+        "attendees": { "type": "number", "description": "Number of people attending" },
+        "eventsAttending": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of event IDs the guest is attending"
+        },
+        "createdAt": { "type": "timestamp" },
+        "websiteOwnerUid": { "type": "string", "description": "The UID of the website owner" }
+      },
+      "required": ["guestName", "status", "attendees", "eventsAttending", "createdAt", "websiteOwnerUid"]
+    }
+  },
+  "firestore": {
+    "websites/{websiteId}": {
+      "schema": { "$ref": "Website" },
+      "description": "Stores the wedding websites created by users"
+    },
+    "websites/{websiteId}/rsvps/{rsvpId}": {
+      "schema": { "$ref": "RSVP" },
+      "description": "Stores the RSVP responses for a specific website"
+    }
+  }
+}

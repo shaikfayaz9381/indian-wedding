@@ -1,0 +1,164 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: websites
+    // Document ID: slug (e.g., bride-groom)
+    // Fields:
+    //   - ownerUid: string (required) - The UID of the user who created this website
+    //   - slug: string (required) - The unique URL slug for the website
+    //   - brideName: string (required, max 50) - Name of the bride
+    //   - groomName: string (required, max 50) - Name of the groom
+    //   - weddingDate: timestamp (required) - The date of the main wedding event
+    //   - message: string (required, max 1000) - A short message to the guests
+    //   - events: list (required, max 10) - List of wedding events
+    //   - createdAt: timestamp (required)
+    //   - updatedAt: timestamp (required)
+    //
+    // Collection: websites/{websiteId}/rsvps
+    // Document ID: auto-generated
+    // Fields:
+    //   - guestName: string (required, max 100) - Name of the guest
+    //   - attendees: number (required, min 1, max 20) - Number of people attending
+    //   - eventsAttending: list (required, max 10) - List of event IDs the guest is attending
+    //   - createdAt: timestamp (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+    
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.ownerUid;
+    }
+    
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+    
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+    
+    function validStringLength(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen;
+    }
+
+    function validOptionalStringLength(field, minLen, maxLen) {
+      return !request.resource.data.keys().hasAll([field]) || 
+        (request.resource.data[field] is string &&
+        request.resource.data[field].size() >= minLen &&
+        request.resource.data[field].size() <= maxLen);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidEvent(event) {
+      return event is map &&
+             event.keys().hasOnly(['id', 'name', 'date', 'time', 'venue', 'address']) &&
+             event.keys().hasAll(['id', 'name', 'date', 'time', 'venue', 'address']) &&
+             event.id is string && event.id.size() > 0 && event.id.size() <= 50 &&
+             event.name is string && event.name.size() > 0 && event.name.size() <= 100 &&
+             event.date is timestamp &&
+             event.time is string && event.time.size() > 0 && event.time.size() <= 50 &&
+             event.venue is string && event.venue.size() > 0 && event.venue.size() <= 200 &&
+             event.address is string && event.address.size() > 0 && event.address.size() <= 500;
+    }
+
+    function areValidEvents(events) {
+      return events is list && events.size() <= 10 &&
+             (events.size() == 0 || (isValidEvent(events[0]) &&
+             (events.size() < 2 || isValidEvent(events[1])) &&
+             (events.size() < 3 || isValidEvent(events[2])) &&
+             (events.size() < 4 || isValidEvent(events[3])) &&
+             (events.size() < 5 || isValidEvent(events[4])) &&
+             (events.size() < 6 || isValidEvent(events[5])) &&
+             (events.size() < 7 || isValidEvent(events[6])) &&
+             (events.size() < 8 || isValidEvent(events[7])) &&
+             (events.size() < 9 || isValidEvent(events[8])) &&
+             (events.size() < 10 || isValidEvent(events[9]))));
+    }
+
+    function isValidWebsite() {
+      return hasOnlyAllowedFields(['ownerUid', 'slug', 'brideName', 'groomName', 'weddingDate', 'message', 'events', 'createdAt', 'updatedAt']) &&
+             hasRequiredFields(['ownerUid', 'slug', 'brideName', 'groomName', 'weddingDate', 'message', 'events', 'createdAt', 'updatedAt']) &&
+             request.resource.data.ownerUid == request.auth.uid &&
+             validStringLength('slug', 3, 100) &&
+             request.resource.data.slug.matches('^[a-z0-9-]+$') &&
+             validStringLength('brideName', 1, 50) &&
+             validStringLength('groomName', 1, 50) &&
+             request.resource.data.weddingDate is timestamp &&
+             validStringLength('message', 0, 1000) &&
+             areValidEvents(request.resource.data.events) &&
+             request.resource.data.createdAt is timestamp &&
+             request.resource.data.updatedAt is timestamp;
+    }
+
+    function isValidRSVP() {
+      return hasOnlyAllowedFields(['guestName', 'status', 'attendees', 'eventsAttending', 'createdAt', 'websiteOwnerUid']) &&
+             hasRequiredFields(['guestName', 'status', 'attendees', 'eventsAttending', 'createdAt', 'websiteOwnerUid']) &&
+             validStringLength('guestName', 1, 100) &&
+             (request.resource.data.status == 'attending' || request.resource.data.status == 'not_attending') &&
+             request.resource.data.attendees is number &&
+             request.resource.data.attendees >= 0 &&
+             request.resource.data.attendees <= 20 &&
+             request.resource.data.eventsAttending is list &&
+             request.resource.data.eventsAttending.size() <= 10 &&
+             request.resource.data.createdAt is timestamp &&
+             request.resource.data.websiteOwnerUid is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /websites/{websiteId} {
+      // Anyone can read a website (publicly shareable)
+      allow read: if true;
+      
+      // Only authenticated users can create their own website
+      allow create: if isAuthenticated() && 
+                    isValidWebsite() &&
+                    request.resource.data.slug == websiteId; // Document ID must match slug
+      
+      // Only the owner can update their website
+      allow update: if isDocOwner() && 
+                    isValidWebsite() &&
+                    request.resource.data.ownerUid == resource.data.ownerUid && // Cannot change owner
+                    request.resource.data.slug == resource.data.slug && // Cannot change slug
+                    (!('createdAt' in resource.data) || request.resource.data.createdAt == resource.data.createdAt); // Cannot change creation time
+      
+      // Only the owner can delete their website
+      allow delete: if isDocOwner();
+
+      match /rsvps/{rsvpId} {
+        // Only the website owner can read RSVPs
+        allow read: if isAuthenticated() && resource.data.websiteOwnerUid == request.auth.uid;
+        
+        // Anyone can create an RSVP (public form)
+        allow create: if isValidRSVP();
+        
+        // No updates or deletes allowed for RSVPs to keep it simple and secure
+        allow update, delete: if false;
+      }
+    }
+  }
+}
